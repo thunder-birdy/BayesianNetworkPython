@@ -41,6 +41,7 @@ class Edge:
 class Graph:
     def __init__(self, NodeNumber, NodesList):
         self.Connections = [[None for j in xrange(NodeNumber)] for i in xrange(NodeNumber)]
+        self.Directions = [[None for j in xrange(NodeNumber)] for i in xrange(NodeNumber)]
         self.NodesList = NodesList
         self.NodeNumber = len(self.NodesList)
         self.NodesDict = dict(zip(NodesList, [i for i in xrange(len(NodesList))] ))
@@ -126,15 +127,23 @@ class Graph:
         return ret, CMIs
 
     def GetPathBetweenTwoNodes(self, node1, node2):
+        paths = self.GetPathHelper(node1, node2, self.Connections)
+        return paths
+
+    def GetDirectionPathBetweenTwoNodes(self, node1, node2):
+        paths = self.GetPathHelper(node1, node2, self.Directions)
+        return paths
+
+    def GetPathHelper(self, node1, node2, Connections):
         node1Seq = self.NodesDict[node1]
         node2Seq = self.NodesDict[node2]
         paths = []
         nowpath = []
         bannedNodeSeqSet = set()
-        self.GetPathDFS(node1Seq, node2Seq, nowpath, paths, bannedNodeSeqSet)
+        self.GetPathDFS(node1Seq, node2Seq, nowpath, paths, bannedNodeSeqSet, Connections)
         return paths
 
-    def GetPathDFS(self, node1Seq, node2Seq, nowpath, paths, bannedNodeSeqSet):
+    def GetPathDFS(self, node1Seq, node2Seq, nowpath, paths, bannedNodeSeqSet, Connections):
         #logger.debug(nowpath)
         nowpath.append(node1Seq)
         bannedNodeSeqSet.add(node1Seq)
@@ -142,7 +151,7 @@ class Graph:
         if node1Seq == node2Seq:
             paths.append(copy.copy(nowpath))
         
-        for i, neibor in enumerate(self.Connections[node1Seq]):
+        for i, neibor in enumerate(Connections[node1Seq]):
             if neibor is not None and i not in bannedNodeSeqSet:
                 self.GetPathDFS(i, node2Seq, nowpath, paths, bannedNodeSeqSet)
 
@@ -154,9 +163,30 @@ class Graph:
         neiborSet = set()
         for path in paths:
             if len(path) >= 3:
-                neiborSet.add(self.NodeList[path[1]])
-                neiborSet.add(self.NodeList[path[-2]])
+                neiborSet.add(self.NodesList[path[1]])
+                neiborSet.add(self.NodesList[path[-2]])
         return neiborSet
+
+    def SetEdgeDirection(self, node1, node2):
+        node1Seq = self.NodesDict[node1]
+        node2Seq = self.NodesDict[node2]
+        self.Directions[node1Seq][node2Seq] = True
+
+    def ParentOf(self, node1, node2):
+        node1Seq = self.NodesDict[node1]
+        node2Seq = self.NodesDict[node2]
+        if self.Directions[node1Seq][node2Seq]:
+            return True
+        else:
+            return False
+
+    def Adjacent(self, node1, node2):
+        node1Seq = self.NodesDict[node1]
+        node2Seq = self.NodesDict[node2]
+        if self.Connections[node1Seq][node2Seq] is not None:
+            return True
+        else:
+            return False
 
 class BayesianNetwork:
     def __init__(self, ColumnNames, ColumnVals, Measurements):
@@ -203,7 +233,7 @@ class BayesianNetwork:
         while self.AllEdges:
             edge = self.AllEdges.pop()
             sepRes = None
-            #sepRes = self.TryToSeperate(self.BasicGraph, edge.Nodes[0], edge.Nodes[1])
+            sepRes = self.TryToSeperate(self.BasicGraph, edge.Nodes[0], edge.Nodes[1])
             if not sepRes:
                 self.BasicGraph.addEdge(edge)
             else:
@@ -219,17 +249,26 @@ class BayesianNetwork:
                 if not separable:
                     self.BasicGraph.addEdge(edgeDeletedTmp)
 
-    def ConditionalMutualInformation(self, Xi, Xj, Conditions):
+    def ConditionalMutualInformation(self, Xi, Xj, Conditions, SpecificConditionStrList = None):
         ret = 0
         XiVals = collections.defaultdict(float)
         XjVals = collections.defaultdict(float)
         XiXjVals = collections.defaultdict(float)
-        ConditionCombinations = set([""])
+
+        ConditionStr = None
+        if SpecificConditionStrList:
+            ConditionStr = ",".join(SpecificConditionStrList)
 
         TotalLineNumber = len(Xi.OriginalVals)
         for i in xrange(TotalLineNumber):
-            thekey = ",".join([condition.OriginalVals[i] for condition in Conditions])
-            ConditionCombinations.add(thekey)
+            thekey = ""
+
+            if Conditions:
+                thekey = ",".join([condition.OriginalVals[i] for condition in Conditions])
+                #not the specific condition
+                if ConditionStr:
+                    if thekey != ConditionStr:
+                        continue
 
             XiVals[thekey + "#" + Xi.OriginalVals[i]] += self.Measurements[i]
             XjVals[thekey + "#" + Xj.OriginalVals[i]] += self.Measurements[i]
@@ -243,7 +282,6 @@ class BayesianNetwork:
         for key in XiXjVals:
             XiXjVals[key] /= self.TotalMeasurement
 
-        print XiVals, XjVals, XiXjVals
         #calculate mutual information
         for xiKey in XiVals:
             for xjKey in XjVals:
@@ -255,7 +293,7 @@ class BayesianNetwork:
                 Pcxj = XjVals[xjKey]
                 Pcxixj = XiXjVals[xixjKey]
 
-                thismi = Pcxixj * math.log(Pcxixj/(Pcxi*Pcxj), 2)
+                thismi = Pcxixj * math.log(Pcxixj/(Pcxi*Pcxj))
                 ret += thismi 
 
         return ret
@@ -296,15 +334,18 @@ class BayesianNetwork:
                 for j in xrange(i+1, len(Sa)):
                     s1 = Sa[i]
                     s2 = Sa[j]
-                    node1_node2_path_neibors = self.BasicGraph.GetNeighborsInPathBetweenTwoNodes(s1, s2)
+                    s1_s2_path_neibors = self.BasicGraph.GetNeighborsInPathBetweenTwoNodes(s1, s2)
                     CMI_with_a = self.ConditionalMutualInformation(s1, s2, s1_s2_path_neibors)
-                    CMI_without_a = self.ConditionalMutualInformation(s1, s2, s1_s2_path_neibors.remove(a))
+                    s1_s2_path_neibors.remove(a)
+                    CMI_without_a = self.ConditionalMutualInformation(s1, s2, s1_s2_path_neibors)
 
                     if CMI_with_a > CMI_without_a:
                         #let s1 s2 be parent of a
-                        pass
+                        self.BasicGraph.SetEdgeDirection(s1, a)
+                        self.BasicGraph.SetEdgeDirection(s2, a)
                     elif CMI_with_a == CMI_without_a:
                         undecidedTriplet.add((s1, a, s2))
+
             for x in Sa:
                 #traverse a parent of a
                 candidates = []
@@ -312,8 +353,7 @@ class BayesianNetwork:
                     triplet1= (x, a , parent_of_a)
                     if triplet1 not in undecidedTriplet:
                         #let x be child of a
-                        continue
-
+                        self.BasicGraph.SetEdgeDirection(a, x)
         
         nodesNum = self.BasicGraph.NodeNumber
 
@@ -324,15 +364,20 @@ class BayesianNetwork:
                 for j in xrange(i+1, nodesNum):
                     for k in xrange(j+1, nodesNum):
                         a, b, c = self.BasicGraph.NodesList[i], self.BasicGraph.NodesList[j], self.BasicGraph.NodesList[k]
-                        #if a is parent of b, b and c are adjacent, bc nor oriented and <a,b,c> not undecided.
+                        #if a is parent of b, b and c are adjacent, bc nots oriented and <a,b,c> not undecided.
                         #b be parent of c
+                        if self.BasicGraph.ParentOf(a, b) and self.BasicGraph.Adjacent(b, c) and (a, b, c) not in undecidedTriplet:
+                            self.BasicGraph.SetEdgeDirection(b, c)
 
             #STEP3
             undirectedEdges = []
-            for ue in undecided:
+            for ue in undecidedTriplet:
                 node1 = ue.Nodes[0]
                 node2 = ue.Nodes[1]
                 #if there is a directed path from node1 to node2, orient the edge node1 -> node2
+                dpaths = self.BasicGraph.GetDirectionPathBetweenTwoNodes()
+                if dpaths:
+                    self.BasicGraph.SetEdgeDirection(node1, node2)
 
 
 class DataParser:

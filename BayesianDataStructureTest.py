@@ -17,7 +17,7 @@ class mytest(unittest.TestCase):
         bynt.Thickening()
         print bynt.BasicGraph
 
-    def testCMI(self):
+    def oldtestCMI(self):
         vals = [["chn", "chn", "us"], ["suv", "suv", "crv"], ["small", "big", "small"]]
         #col0 col1 0.5004024, col0 col2 == col1 col2
         bynt = BayesianDataStructure.BayesianNetwork(["col0", "col1", "col2"], vals, [300, 500, 200])
@@ -29,8 +29,18 @@ class mytest(unittest.TestCase):
         self.assertEqual("%.7f" % bynt.BasicGraph.Connections[0][1], "0.7219281")
         self.assertEqual(bynt.BasicGraph.Connections[0][2], bynt.BasicGraph.Connections[1][2])
 
+    def testCMINew(self):
+        vals = [["chn", "us", "chn", "us"], ["suv", "suv", "crv", "crv"], [300, 300, 300, 100]]
+        bynt = BayesianDataStructure.BayesianNetwork(["col0", "col1"], vals[:2], vals[-1])
+        print bynt.ConditionalMutualInformation(bynt.Nodes[0], bynt.Nodes[1], [])
+        bynt.Draft()
+        bynt.Thickening()
+        bynt.Thinning()
+        print "a"
+
     def testDrawGraph(self):
-        jgraph.draw([(1,2), (2,3), (3,4)]) 
+        #jgraph.draw([(1,2), (2,3), (3,4)])
+        pass
 
 if __name__ == "__main__":
     unittest.main()
