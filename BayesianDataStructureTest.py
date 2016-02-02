@@ -6,9 +6,9 @@ class mytest(unittest.TestCase):
     def testInit(self):
         node1 = BayesianDataStructure.Node("CarType", 10000, ["suv", "sedan"], [7000, 3000])
 
-    def ftestDataParser(self):
+    def testDataParser(self):
         dp = BayesianDataStructure.DataParser()
-        dp.readCsvFile(r"D:\projects\data_compression\BayesianNetworkPython\DATA\AggUsage_OneDriveForBusiness_Aggregated_selectColumns.txt", True, 300000)
+        dp.readCsvFile(r"D:\projects\data_compression\BayesianNetworkPython\DATA\AggUsage_OneDriveForBusiness_Aggregated_selectColumns.txt", True, 10000)
         Measurements = map(lambda x: float(x), dp.ColumnVals[-1])
         bynt = BayesianDataStructure.BayesianNetwork(dp.ColumnNames[:-1], dp.ColumnVals[:-1], Measurements)
         
@@ -36,7 +36,6 @@ class mytest(unittest.TestCase):
         bynt.Draft()
         bynt.Thickening()
         bynt.Thinning()
-        print "a"
 
     def testDrawGraph(self):
         #jgraph.draw([(1,2), (2,3), (3,4)])

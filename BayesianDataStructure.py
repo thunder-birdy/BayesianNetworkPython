@@ -3,6 +3,7 @@ import math
 import csv
 import copy
 import logging
+import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -60,7 +61,14 @@ class Graph:
             raise Exception("no draw function assigned yet")
         graph, CMIs = self.GetDirectedEdgesAndCMIs()
         CMIs4f = map(lambda x:"%.4f"%x, CMIs)
-        self.DrawFunc(graph, CMIs4f)
+        self.DrawFunc(graph, CMIs4f, True)
+
+    def DrawGraph(self):
+        if self.DrawFunc is None:
+            raise Exception("no draw function assigned yet")
+        graph, CMIs = self.GetEdgesAndCMIs()
+        CMIs4f = map(lambda x:"%.4f"%x, CMIs)
+        self.DrawFunc(graph, CMIs4f, False)
 
     def addEdge(self, edge):
         self.EdgeNumber += 1
@@ -191,14 +199,24 @@ class Graph:
         node2Seq = self.NodesDict[node2]
 
         if self.Directions[node2Seq][node1Seq]:
-            logger.debug("%s->%s has been linked" % (node2.NodeName, node1.NodeName))
+            logger.debug("[linked reverse direction] %s->%s" % (node2.NodeName, node1.NodeName))
             return
-            raise Exception("%s->%s has been linked" % (node2.NodeName, node1.NodeName))
+            raise Exception("[linked] %s->%s" % (node2.NodeName, node1.NodeName))
 
         if self.Directions[node1Seq][node2Seq] is not True:
             logger.debug("edge direction %s->%s" % (node1.NodeName, node2.NodeName))
             self.Directions[node1Seq][node2Seq] = True
-            self.DrawGraphDirected()
+        else:
+             logger.debug("[linked] %s->%s" % (node1.NodeName, node2.NodeName))
+
+    def SetEdgeDirectionForce(self, node1, node2):
+        node1Seq = self.NodesDict[node1]
+        node2Seq = self.NodesDict[node2]
+
+        self.Directions[node2Seq][node1Seq] = None
+
+        if self.Directions[node1Seq][node2Seq] is not True:
+            self.Directions[node1Seq][node2Seq] = True
 
     def ParentOf(self, node1, node2):
         node1Seq = self.NodesDict[node1]
@@ -232,7 +250,7 @@ class BayesianNetwork:
         self.Nodes = []
         self.NodesDict = {}
         self.AllEdges = []
-        self.epsilon = 0.03
+        self.epsilon = 0.003
 
         for i, columnName in enumerate(ColumnNames):
             onenode = Node(columnName, self.TotalMeasurement, ColumnVals[i], Measurements)
@@ -248,12 +266,13 @@ class BayesianNetwork:
             for j in xrange(i+1, nodesize):
                 CMI = self.ConditionalMutualInformation(self.Nodes[i], self.Nodes[j], [])
                 edge = Edge(self.Nodes[i], self.Nodes[j], CMI)
-                logger.debug(str(edge))
                 if CMI >= self.epsilon:
                     self.AllEdges.append(edge)
 
         #sort
         self.AllEdges.sort(cmp=lambda x,y: -1 if y.CMI - x.CMI > 0 else 1)
+        for edge in self.AllEdges:
+            logger.debug(str(edge))
         logger.debug("all valid edges:" + str(len(self.AllEdges)))
 
         while self.AllEdges:
@@ -264,6 +283,7 @@ class BayesianNetwork:
             if not self.BasicGraph.twoNodeConnected(*(biggestEdge.Nodes)):
                 self.BasicGraph.addEdge(biggestEdge)
         logger.debug("Graph ends, edges left:%d" % len(self.AllEdges))
+        self.BasicGraph.DrawGraph()
 
     def Thickening(self):
         while self.AllEdges:
@@ -271,10 +291,10 @@ class BayesianNetwork:
             sepRes = None
             sepRes = self.TryToSeperate(self.BasicGraph, edge.Nodes[0], edge.Nodes[1])
             if not sepRes:
-                logger.debug("not seperate: %s %s" % (edge.Nodes[0].NodeName, edge.Nodes[1].NodeName))
+                logger.debug("[not seperate] %s %s" % (edge.Nodes[0].NodeName, edge.Nodes[1].NodeName))
                 self.BasicGraph.addEdge(edge)
             else:
-                logger.debug("seperate: %s %s" % (edge.Nodes[0].NodeName, edge.Nodes[1].NodeName))
+                logger.debug("[seperated] %s %s" % (edge.Nodes[0].NodeName, edge.Nodes[1].NodeName))
 
     def Thinning(self):
         for edge in self.BasicGraph.Edges:
@@ -308,7 +328,7 @@ class BayesianNetwork:
 
             XiVals[(thekey, Xi.OriginalVals[i])] += self.Measurements[i]
             XjVals[(thekey, Xj.OriginalVals[i])] += self.Measurements[i]
-            XiXjVals[(thekey, Xi.OriginalVals[i] + Xj.OriginalVals[i])] += self.Measurements[i]
+            XiXjVals[(thekey, Xi.OriginalVals[i], Xj.OriginalVals[i])] += self.Measurements[i]
 
         #change number to possibility
         for key in XiVals:
@@ -319,22 +339,21 @@ class BayesianNetwork:
             XiXjVals[key] /= self.TotalMeasurement
 
         #calculate mutual information
-        for xiKey in XiVals:
-            for xjKey in XjVals:
-                xixjKey  = (xiKey[0], xiKey[1]+xjKey[1])
-                if xixjKey not in XiXjVals:
-                    continue
+        for xixjKey in XiXjVals:
+            xiKey = (xixjKey[0], xixjKey[1])
+            xjKey = (xixjKey[0], xixjKey[2])
 
-                Pcxi = XiVals[xiKey]
-                Pcxj = XjVals[xjKey]
-                Pcxixj = XiXjVals[xixjKey]
+            Pcxi = XiVals[xiKey]
+            Pcxj = XjVals[xjKey]
+            Pcxixj = XiXjVals[xixjKey]
 
-                thismi = Pcxixj * math.log(Pcxixj/(Pcxi*Pcxj))
-                ret += thismi
+            thismi = Pcxixj * math.log(Pcxixj/(Pcxi*Pcxj))
+            ret += thismi
 
         return ret
 
     def TryToSeperate(self, CurrentGraph, node1, node2, StaticCondition = False):
+        time1 = datetime.datetime.now()
         N1, N2 = self.BasicGraph.GetNeighborsInPathBetweenTwoNodes(node1, node2)
         N1Children = self.BasicGraph.GetChildren(node1)
         N2Children = self.BasicGraph.GetChildren(node2)
@@ -345,8 +364,11 @@ class BayesianNetwork:
             tmp = N1; N1 = N2; N2 = tmp
 
         N = [N1, N2]
-        for i in xrange(2):
+        if N1 == N2:
+            N = [N1]
+        for i in xrange(len(N)):
             conditionset = N[i]
+            logger.debug("[try to seperate] %s-%s on conditions %s" % (node1.NodeName, node2.NodeName, ",".join(map(lambda x: x.NodeName, conditionset))))
             conditionlist = list(conditionset)
             StaticConditionlist = None
             if StaticCondition:
@@ -395,6 +417,7 @@ class BayesianNetwork:
             CurrentGraph = self.BasicGraph
         undecidedTriplet = set()
 
+        EdgedDict = {}
         #STEP1
         for a in self.BasicGraph.NodesList:
             nodeNeiborsSet = self.BasicGraph.GetNeighbors(a)
@@ -413,10 +436,22 @@ class BayesianNetwork:
                     if CMI_with_a > CMI_without_a:
                         logger.debug("s1:%s a:%s s2:%s %.3f %.3f" % (s1.NodeName, a.NodeName, s2.NodeName, CMI_with_a, CMI_without_a))
                         #let s1 s2 be parent of a
-                        self.BasicGraph.SetEdgeDirection(s1, a)
-                        self.BasicGraph.SetEdgeDirection(s2, a)
+                        CMI_diff = CMI_with_a - CMI_without_a
+                        edgeKey1 = frozenset([s1, a])
+                        if edgeKey1 not in EdgedDict or (EdgedDict[edgeKey1] < CMI_diff):
+                            self.BasicGraph.SetEdgeDirectionForce(s1, a)
+                            EdgedDict[edgeKey1] = CMI_diff
+
+                        edgeKey2 = frozenset([s2, a])
+                        if edgeKey2 not in EdgedDict or (EdgedDict[edgeKey2] < CMI_diff):
+                            self.BasicGraph.SetEdgeDirectionForce(s2, a)
+                            EdgedDict[edgeKey2] = CMI_diff
+
                     elif CMI_with_a == CMI_without_a:
                         undecidedTriplet.add((s1, a, s2))
+
+            if True:
+                continue
 
             for x in Sa:
                 if self.BasicGraph.ParentOf(x, a):
@@ -428,9 +463,9 @@ class BayesianNetwork:
                     if triplet1 not in undecidedTriplet:
                         #let x be child of a
                         self.BasicGraph.SetEdgeDirection(a, x)
-        
-        nodesNum = self.BasicGraph.NodeNumber
 
+        return
+        nodesNum = self.BasicGraph.NodeNumbe
         #orient until no more dege can be orient
         for i in xrange(10):
             #STEP2
@@ -459,13 +494,13 @@ class DataParser:
         self.ColumnNames = []
         self.ColumnVals = []
 
-    def readCsvFile(self, path, hasHeader=True, maxlen=None):
+    def readCsvFile(self, path, hasHeader=True, maxlen=None, Delimiter="\t"):
         ColumnNames = []
         ColumnVals = []
         numline = 0
 
         with open(path, "rb") as csvfile:
-            spamreader = csv.reader(csvfile, delimiter='\t', quotechar='|')
+            spamreader = csv.reader(csvfile, delimiter=Delimiter, quotechar='|')
             for row in spamreader:
                 #deal header
                 numline += 1
